@@ -1,0 +1,58 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <title>Gerar numeros primos</title>
+  <style>
+    body { font-family: Arial, sans-serif; margin: 2rem; }
+    label { display: block; margin-bottom: 0.5rem; }
+    input { padding: 0.4rem; width: 6rem; }
+    button { padding: 0.5rem 1rem; margin-left: 0.5rem; }
+    #resultado { margin-top: 1rem; }
+  </style>
+</head>
+<body>
+  <h1>Primeiros n numeros primos</h1>
+  <div>
+    <label for="quantidade">Informe n:</label>
+    <input type="number" id="quantidade" min="1" value="20">
+    <button id="gerar">Gerar</button>
+  </div>
+  <div id="resultado"></div>
+
+  <script>
+    function isPrime(n) {
+      if (n < 2) return false;
+      if (n === 2 || n === 3) return true;
+      if (n % 2 === 0) return false;
+      const limit = Math.floor(Math.sqrt(n));
+      for (let i = 3; i <= limit; i += 2) {
+        if (n % i === 0) return false;
+      }
+      return true;
+    }
+
+    function firstNPrimes(count) {
+      const primes = [];
+      let candidate = 2;
+      while (primes.length < count) {
+        if (isPrime(candidate)) primes.push(candidate);
+        candidate += 1;
+      }
+      return primes;
+    }
+
+    document.getElementById("gerar").addEventListener("click", () => {
+      const nValue = Number(document.getElementById("quantidade").value);
+      const resultBox = document.getElementById("resultado");
+      if (!Number.isInteger(nValue) || nValue < 1) {
+        resultBox.innerHTML = "<p>Digite um inteiro positivo.</p>";
+        return;
+      }
+      const primes = firstNPrimes(nValue);
+      const content = `{${primes.join(", ")}}`;
+      resultBox.innerHTML = `<p>${content}</p>`;
+    });
+  </script>
+</body>
+</html>
