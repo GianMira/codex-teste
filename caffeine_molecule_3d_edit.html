@@ -1,0 +1,264 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<title>Cafeína 3-D • Versão Corrigida</title>
+<style>
+  html,body{margin:0;height:100%;background:#111;}
+  #scene   {width:100%;height:100%;touch-action:none;cursor:grab;}
+  #scene:active{cursor:grabbing;}
+
+  .bond  {stroke:#bbb;stroke-linecap:round;}
+  .atom  {stroke:#000;}
+  .label {fill:#000;font:700 10px/1 Arial,Helvetica,sans-serif;text-anchor:middle;
+          pointer-events:none;user-select:none;}
+</style>
+</head>
+<body>
+<svg id="scene">
+  <defs>
+    <!-- gradientes dão relevo às esferas -->
+    <radialGradient id="gC" cx="35%" cy="35%" r="65%">
+      <stop offset="0%" stop-color="#eee"/><stop offset="60%" stop-color="#9b9b9b"/>
+      <stop offset="100%" stop-color="#666"/>
+    </radialGradient>
+    <radialGradient id="gN" cx="35%" cy="35%" r="65%">
+      <stop offset="0%" stop-color="#e6ebff"/><stop offset="60%" stop-color="#4d73ff"/>
+      <stop offset="100%" stop-color="#3050ff"/>
+    </radialGradient>
+    <radialGradient id="gO" cx="35%" cy="35%" r="65%">
+      <stop offset="0%" stop-color="#ffd6d6"/><stop offset="60%" stop-color="#ff7a7a"/>
+      <stop offset="100%" stop-color="#ff1111"/>
+    </radialGradient>
+    <radialGradient id="gH" cx="35%" cy="35%" r="65%">
+      <stop offset="0%" stop-color="#fff"/><stop offset="100%" stop-color="#ddd"/>
+    </radialGradient>
+  </defs>
+</svg>
+
+<script>
+/* ---------- dados ---------- */
+const ATOMS=[["C",1.07317,0.04885,-0.07573],["N",2.51365,0.01256,-0.0758],
+["C",3.35199,1.09592,-0.07533],["N",4.61898,0.73028,-0.07549],
+["C",4.57907,-0.63144,-0.07531],["C",3.30131,-1.10256,-0.07524],
+["C",2.98068,-2.48687,-0.07377],["O",1.8253,-2.90038,-0.07577],
+["N",4.1144,-3.30433,-0.06936],["C",5.45174,-2.85618,-0.07235],
+["O",6.38934,-3.65965,-0.07232],["N",5.6624,-1.47682,-0.07487],
+["C",7.00947,-0.93648,-0.07524],["C",3.92063,-4.74093,-0.06158],
+["H",0.73398,1.08786,-0.07503],["H",0.71239,-0.45698,0.82335],
+["H",0.7124,-0.4558,-0.97549],["H",2.99301,2.11762,-0.07478],
+["H",7.76531,-1.72634,-0.07591],["H",7.14864,-0.32182,0.81969],
+["H",7.14802,-0.32076,-0.96953],["H",2.86501,-5.02316,-0.05833],
+["H",4.40233,-5.1592,0.82837],["H",4.40017,-5.16929,-0.9478]];
+
+const FILL={C:"url(#gC)",N:"url(#gN)",O:"url(#gO)",H:"url(#gH)"};
+const RAD  ={C:14,N:16,O:16,H:8};
+const BOND_W=4;
+
+/* ---------- ligações ---------- */
+const bonds=[], doubleBonds=[];
+const DOUBLE_BONDS=[
+  [6,7],   // C=O (carbonila)
+  [9,10],  // C=O (carbonila)
+  [2,3],   // C=N no anel
+  [4,11]   // C=N no anel
+];
+
+for(let i=0;i<ATOMS.length;i++)
+ for(let j=i+1;j<ATOMS.length;j++){
+   const [ ,ax,ay,az]=ATOMS[i],[ ,bx,by,bz]=ATOMS[j];
+   const d2=(ax-bx)**2+(ay-by)**2+(az-bz)**2;
+   if(d2<2.7 && !(ATOMS[i][0]==='H'&&ATOMS[j][0]==='H')) {
+     bonds.push([i,j]);
+     const isDouble=DOUBLE_BONDS.some(([a,b])=>(i===a&&j===b)||(i===b&&j===a));
+     doubleBonds.push(isDouble);
+   }
+ }
+
+/* ---------- utils ---------- */
+const vDot=(a,b)=>a[0]*b[0]+a[1]*b[1]+a[2]*b[2];
+const vCross=(a,b)=>[a[1]*b[2]-a[2]*b[1],a[2]*b[0]-a[0]*b[2],a[0]*b[1]-a[1]*b[0]];
+const vNorm=v=>{const l=Math.hypot(...v);return l?v.map(x=>x/l):[0,0,0];};
+const qMul=(q1,q2)=>{const[w1,x1,y1,z1]=q1,[w2,x2,y2,z2]=q2;
+ return[w1*w2-x1*x2-y1*y2-z1*z2,w1*x2+x1*w2+y1*z2-z1*y2,
+        w1*y2-x1*z2+y1*w2+z1*x2,w1*z2+x1*y2-y1*x2+z1*w2];};
+const qNorm=q=>{const l=Math.hypot(...q);return q.map(v=>v/l);};
+const qRot=(v,q)=>{const[w,x,y,z]=q,u=[x,y,z];
+  const uv=vCross(u,v),uuv=vCross(u,uv);
+  return v.map((c,i)=>c+2*(w*uv[i]+uuv[i]));};
+
+/* ---------- buffers ---------- */
+const svg=document.getElementById("scene");
+const atomCircles=[], atomLabels=[], bondLines=[], doubleBondLines=[];
+
+/* centro geométrico */
+const center=[0,0,0];
+ATOMS.forEach(a=>{center[0]+=a[1];center[1]+=a[2];center[2]+=a[3];});
+center.forEach((v,i)=>center[i]/=ATOMS.length);
+
+/* projeção */
+const FOV=600, ZOOM=60;
+const project=v=>{const {width:w,height:h}=svg.getBoundingClientRect();
+ const s=FOV/(FOV+v[2]); return[w/2+v[0]*s*ZOOM,h/2-v[1]*s*ZOOM,s];};
+
+/* trackball + inércia */
+let qOrient=[1,0,0,0], dragging=false,lastV=null,lastDQ=[1,0,0,0], inertia=[1,0,0,0];
+const DECAY=0.98;
+const screenToBall=(px,py)=>{const rct=svg.getBoundingClientRect();
+ const w=rct.width,h=rct.height,r=Math.min(w,h)/2;
+ const cx=rct.left+w/2,cy=rct.top+h/2,x=(px-cx)/r,y=(py-cy)/r,d2=x*x+y*y;
+ return vNorm([x,-y,d2>1?0:Math.sqrt(1-d2)]);};
+
+/* ---------- render ---------- */
+function render(){
+  const {width:w,height:h}=svg.getBoundingClientRect();
+  svg.setAttribute("viewBox",`0 0 ${w} ${h}`);
+
+  const items=[], atomsInfo=[];
+
+  /* átomos */
+  ATOMS.forEach(([el,x,y,z],i)=>{
+    const v=qRot([x-center[0],y-center[1],z-center[2]],qOrient);
+    const [X,Y,s]=project(v); const r=RAD[el]*s;
+
+    atomsInfo[i]={X,Y,r,z:v[2],el,pos3d:v};
+
+    let c=atomCircles[i];
+    if(!c){c=document.createElementNS(svg.namespaceURI,"circle");
+      c.setAttribute("class","atom"); atomCircles[i]=c; svg.appendChild(c);}
+    c.setAttribute("cx",X); c.setAttribute("cy",Y);
+    c.setAttribute("r",r);  c.setAttribute("fill",FILL[el]);
+    c.setAttribute("stroke-width",0.5*s);
+
+    let t=atomLabels[i];
+    if(!t){t=document.createElementNS(svg.namespaceURI,"text");
+      t.setAttribute("class","label"); atomLabels[i]=t; svg.appendChild(t);}
+    t.textContent=el; t.setAttribute("x",X); t.setAttribute("y",Y+1);
+    t.setAttribute("font-size",Math.max(6,r*0.9));
+
+    items.push({el:c,depth:-v[2]});
+    items.push({el:t,depth:-v[2]-1e-4});
+  });
+
+  /* ligações */
+  bonds.forEach(([ia,ib],k)=>{
+    const A=atomsInfo[ia], B=atomsInfo[ib];
+    const dx=B.X-A.X, dy=B.Y-A.Y, len=Math.hypot(dx,dy)||1,
+          ux=dx/len,  uy=dy/len;
+    const x1=A.X+ux*A.r, y1=A.Y+uy*A.r,
+          x2=B.X-ux*B.r, y2=B.Y-uy*B.r;
+
+    const isDouble=doubleBonds[k];
+    const bondWidth=BOND_W*((A.r+B.r)/(RAD.C+RAD.C));
+
+    if(isDouble){
+      // offset em 3D ancorado no "up" da câmera para evitar flips de 180° ao girar
+      const bondVec3d=[B.pos3d[0]-A.pos3d[0],B.pos3d[1]-A.pos3d[1],B.pos3d[2]-A.pos3d[2]];
+      const bondUnit3d=vNorm(bondVec3d);
+      let perp3d=vCross(bondUnit3d,[0,1,0]);
+      if(Math.hypot(...perp3d)<1e-4) perp3d=vCross(bondUnit3d,[1,0,0]);
+      perp3d=vNorm(perp3d);
+
+      // escala o offset para ter largura consistente em pixels
+      const [aBaseX,aBaseY]=project(A.pos3d);
+      const [aOffX,aOffY]=project([A.pos3d[0]+perp3d[0],A.pos3d[1]+perp3d[1],A.pos3d[2]+perp3d[2]]);
+      const screenScale=Math.max(1e-4,Math.hypot(aOffX-aBaseX,aOffY-aBaseY));
+      const offsetPx=bondWidth*0.75;
+      const offsetWorld=offsetPx/screenScale;
+      const offset3d=perp3d.map(v=>v*offsetWorld);
+
+      const A1_3d=[A.pos3d[0]+offset3d[0],A.pos3d[1]+offset3d[1],A.pos3d[2]+offset3d[2]];
+      const B1_3d=[B.pos3d[0]+offset3d[0],B.pos3d[1]+offset3d[1],B.pos3d[2]+offset3d[2]];
+      const A2_3d=[A.pos3d[0]-offset3d[0],A.pos3d[1]-offset3d[1],A.pos3d[2]-offset3d[2]];
+      const B2_3d=[B.pos3d[0]-offset3d[0],B.pos3d[1]-offset3d[1],B.pos3d[2]-offset3d[2]];
+
+      const [A1X,A1Y]=project(A1_3d), [B1X,B1Y]=project(B1_3d);
+      const [A2X,A2Y]=project(A2_3d), [B2X,B2Y]=project(B2_3d);
+
+      // corta nas superfícies das esferas em tela
+      const dx1=B1X-A1X, dy1=B1Y-A1Y, len1=Math.hypot(dx1,dy1)||1;
+      const ux1=dx1/len1, uy1=dy1/len1;
+      const dx2=B2X-A2X, dy2=B2Y-A2Y, len2=Math.hypot(dx2,dy2)||1;
+      const ux2=dx2/len2, uy2=dy2/len2;
+
+      const ax1=A1X+ux1*A.r, ay1=A1Y+uy1*A.r;
+      const bx1=B1X-ux1*B.r, by1=B1Y-uy1*B.r;
+      const ax2=A2X+ux2*A.r, ay2=A2Y+uy2*A.r;
+      const bx2=B2X-ux2*B.r, by2=B2Y-uy2*B.r;
+
+      let l1=bondLines[k];
+      if(!l1){l1=document.createElementNS(svg.namespaceURI,"line");
+        l1.setAttribute("class","bond"); bondLines[k]=l1; svg.appendChild(l1);}
+      l1.setAttribute("x1",ax1); l1.setAttribute("y1",ay1);
+      l1.setAttribute("x2",bx1); l1.setAttribute("y2",by1);
+      l1.setAttribute("stroke-width",bondWidth*0.75);
+
+      let l2=doubleBondLines[k];
+      if(!l2){l2=document.createElementNS(svg.namespaceURI,"line");
+        l2.setAttribute("class","bond"); doubleBondLines[k]=l2; svg.appendChild(l2);}
+      l2.setAttribute("x1",ax2); l2.setAttribute("y1",ay2);
+      l2.setAttribute("x2",bx2); l2.setAttribute("y2",by2);
+      l2.setAttribute("stroke-width",bondWidth*0.75);
+
+      const depth=-Math.min(A.z,B.z)-1e-3;
+      items.push({el:l1,depth});
+      items.push({el:l2,depth});
+    } else {
+      let l=bondLines[k];
+      if(!l){l=document.createElementNS(svg.namespaceURI,"line");
+        l.setAttribute("class","bond"); bondLines[k]=l; svg.appendChild(l);}
+      l.setAttribute("x1",x1); l.setAttribute("y1",y1);
+      l.setAttribute("x2",x2); l.setAttribute("y2",y2);
+      l.setAttribute("stroke-width",bondWidth);
+
+      if(doubleBondLines[k]) doubleBondLines[k].setAttribute("stroke-width",0);
+
+      const depth=-Math.min(A.z,B.z)-1e-3;
+      items.push({el:l,depth});
+    }
+  });
+
+  /* order painter */
+  items.sort((a,b)=>b.depth-a.depth);
+  items.forEach(o=>svg.appendChild(o.el));
+}
+
+/* ---------- interacção ---------- */
+function start(e){dragging=true; inertia=[1,0,0,0];
+  const p=e.touches?e.touches[0]:e; lastV=screenToBall(p.clientX,p.clientY);}
+function move(e){
+  if(!dragging) return; e.preventDefault();
+  const p=e.touches?e.touches[0]:e, v=screenToBall(p.clientX,p.clientY);
+  const axis=vCross(lastV,v), dot=Math.min(1,Math.max(-1,vDot(lastV,v))),
+        ang=Math.acos(dot);
+  if(ang>1e-3){
+    const sin2=Math.sin(ang/2), dq=[Math.cos(ang/2),...vNorm(axis).map(c=>c*sin2)];
+    qOrient=qNorm(qMul(dq,qOrient)); lastDQ=dq; lastV=v; render();
+  }
+}
+function end(){dragging=false; inertia=lastDQ;}
+svg.addEventListener("mousedown",start);
+svg.addEventListener("mousemove",move); window.addEventListener("mouseup",end);
+svg.addEventListener("touchstart",start,{passive:false});
+svg.addEventListener("touchmove",move,{passive:false});
+window.addEventListener("touchend",end);
+window.addEventListener("resize",render);
+
+/* ---------- animação inercial ---------- */
+function tick(){
+  if(!dragging){
+    const mag=Math.hypot(inertia[1],inertia[2],inertia[3]);
+    if(mag>1e-4){
+      qOrient=qNorm(qMul(inertia,qOrient));
+      inertia=[inertia[0],inertia[1]*DECAY,inertia[2]*DECAY,inertia[3]*DECAY];
+      render();
+    }
+  }
+  requestAnimationFrame(tick);
+}
+
+/* ---------- iniciar ---------- */
+render(); tick();
+</script>
+</body>
+</html>
